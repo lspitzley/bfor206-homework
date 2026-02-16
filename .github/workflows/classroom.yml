@@ -1,20 +1,72 @@
-    name: GitHub Classroom Workflow
+name: GitHub Classroom Workflow
 
-    on: [push]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
 
-    jobs:
-      build:
-        name: Autograding
-        runs-on: ubuntu-latest
-        steps:
-          - uses: actions/checkout@v2
-          - name: Set up Python 3.8.5
-            uses: actions/setup-python@v2
-            with:
-              python-version: 3.8.5
-          - name: Install dependencies
-            run: |
-              python -m pip install --upgrade pip
-              pip install pytest
-              if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          - uses: education/autograding@v1
+jobs:
+  grade:
+    runs-on: ubuntu-latest
+
+    env:
+      ASSIGNMENT_ID: "hw1"      # path inside tests repo for this assignment
+      TESTS_REPO: "lspitzley/bfor206-spring2026"        # your public tests repo, e.g., university-org/course-tests
+      TESTS_REF: "main"                     # branch | tag | commit SHA
+      PYTHON_VERSION: "3.11"                # set your desired Python version
+
+    steps:
+      - name: Checkout student repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      # If the student's project requires dependencies, install from their requirements
+      - name: Install student dependencies (if present)
+        run: |
+          if [ -f requirements.txt ]; then
+            python -m pip install --upgrade pip
+            pip install -r requirements.txt
+          else
+            python -m pip install --upgrade pip
+          fi
+
+      - name: Checkout tests repository (public)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TESTS_REPO }}
+          ref: ${{ env.TESTS_REF }}
+          path: _external_tests
+
+      - name: Copy tests into workspace
+        run: |
+          mkdir -p tests
+          rsync -a "_external_tests/${ASSIGNMENT_ID}/" "tests/" --exclude 'requirements.txt'
+          ls -R tests
+
+      # If your tests need additional deps that students shouldn't have to vendor
+      - name: Install test-side dependencies (if provided)
+        run: |
+          if [ -f "tests/requirements.txt" ]; then
+            pip install -r tests/requirements.txt
+          fi
+          # Always install pytest (and pytest-cov if you want coverage)
+          pip install pytest pytest-json-report
+
+      - name: Run pytest
+        run: |
+          pytest -q \
+            --maxfail=1 \
+            --disable-warnings \
+            --json-report --json-report-file=pytest-report.json
+
+      - name: Upload pytest report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-report
+          path: pytest-report.json
